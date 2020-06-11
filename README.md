@@ -1,6 +1,6 @@
 # Redis Cluster Template
 
-Deploy redis cluster on OpenShift, it developed based on redis-persistent-template which is a standalone redis server, and will use image registry.redhat.io/rhscl/redis-5-rhel7:5 directly instead of ImageStream in this template. It has been tested on OCP 4.4.3. 
+Deploy redis cluster on OpenShift, it is based on redis-persistent-template which is a standalone redis server from sclorg, and I will use image registry.redhat.io/rhscl/redis-5-rhel7:5 directly instead of ImageStream in this template. It has been tested on OCP 4.4.3. 
 
 For more information please refer to:
 https://catalog.redhat.com/software/containers/rhscl/redis-5-rhel7/5c9922045a13464733ee0ecc

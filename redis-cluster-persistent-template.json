@@ -1,0 +1,258 @@
+{
+  "kind": "Template",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "redis-cluster-persistent",
+    "annotations": {
+      "openshift.io/display-name": "Redis Cluster",
+      "description": "Redis cluster with persistent storage.\n\nNOTE: You must have persistent volumes available in your cluster to use this template.",
+      "iconClass": "icon-redis",
+      "tags": "database,redis",
+      "openshift.io/long-description": "This template provides a Redis cluster.  The data is stored on persistent storage.",
+      "openshift.io/provider-display-name": "Red Hat, Inc."
+    }
+  },
+  "message": "The following service(s) have been created in your project: ${DATABASE_SERVICE_NAME}.\n\n       Password: ${REDIS_PASSWORD}\n Connection URL: redis://${DATABASE_SERVICE_NAME}:6379/\n",
+  "labels": {
+    "template": "redis-cluster-persistent-template"
+  },
+  "objects": [
+    {
+      "kind": "Secret",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${DATABASE_SERVICE_NAME}",
+        "annotations": {
+          "template.openshift.io/expose-password": "{.data['database-password']}"
+        }
+      },
+      "stringData" : {
+        "database-password" : "${REDIS_PASSWORD}"
+      }
+    },
+    {
+      "kind": "Service",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${DATABASE_SERVICE_NAME}",
+        "annotations": {
+          "template.openshift.io/expose-uri": "redis://{.spec.clusterIP}:{.spec.ports[?(.name==\"redis\")].port}"
+        }
+      },
+      "spec": {
+        "ports": [
+          {
+            "name": "redis",
+            "protocol": "TCP",
+            "port": 6379,
+            "targetPort": 6379,
+            "nodePort": 0
+          }
+        ],
+        "selector": {
+          "name": "${DATABASE_SERVICE_NAME}"
+        },
+        "type": "ClusterIP",
+        "sessionAffinity": "None"
+      },
+      "status": {
+        "loadBalancer": {}
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "data": {
+          "post-init.sh": "# This file serves for extending the container image, typically by changing\n# the configuration, loading some data etc.\n\n# Feel free to add content to this file or rewrite it at all.\n# You may also start redis server locally to load some data for example,\n# but do not forget to stop it after it, so it can be restarted after it.\n\ncat \u003c\u003c EOF \u003e\u003e /etc/redis.conf\ncluster-enabled yes\ncluster-require-full-coverage no\ncluster-node-timeout 15000\ncluster-config-file /var/lib/redis/data/nodes.conf\ncluster-migration-barrier 1\nEOF\n\nif [ -f /var/lib/redis/data/nodes.conf ]; then\n  sed -i -e \"/myself/ s/[0-9]\\{1,3\\}\\.[0-9]\\{1,3\\}\\.[0-9]\\{1,3\\}\\.[0-9]\\{1,3\\}/${POD_IP}/\" /var/lib/redis/data/nodes.conf\nfi\n"
+      },
+      "kind": "ConfigMap",
+      "metadata": {
+          "name": "${DATABASE_SERVICE_NAME}"
+      }
+    },
+    {
+      "kind": "StatefulSet",
+      "apiVersion": "apps/v1",
+      "metadata": {
+        "name": "${DATABASE_SERVICE_NAME}",
+        "annotations": {
+          "template.alpha.openshift.io/wait-for-ready": "true"
+        }
+      },
+      "spec": {
+        "strategy": {
+          "type": "Recreate"
+        },
+        "podManagementPolicy": "OrderedReady",
+        "replicas": 6,
+        "revisionHistoryLimit": 10,
+        "selector": {
+          "matchLabels": {
+            "name": "${DATABASE_SERVICE_NAME}"
+          }
+        },
+        "serviceName": "${DATABASE_SERVICE_NAME}",
+        "template": {
+          "metadata": {
+            "labels": {
+              "name": "${DATABASE_SERVICE_NAME}"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "name": "redis",
+                "image": "registry.redhat.io/rhscl/redis-5-rhel7:5",
+                "ports": [
+                  {
+                    "containerPort": 6379,
+                    "protocol": "TCP",
+                    "name": "redis"
+                  },
+                  {
+                    "containerPort": 16379,
+                    "protocol": "TCP",
+                    "name": "gossip"
+                  }
+                ],
+                "readinessProbe": {
+                  "timeoutSeconds": 1,
+                  "initialDelaySeconds": 5,
+                  "exec": {
+                    "command": [ "/bin/sh", "-i", "-c", "test \"$(redis-cli -h 127.0.0.1 -a $REDIS_PASSWORD ping)\" == \"PONG\""]
+                  }
+                },
+                "livenessProbe": {
+                  "timeoutSeconds": 1,
+                  "initialDelaySeconds": 30,
+                  "tcpSocket": {
+                    "port": 6379
+                  }
+                },
+                "env": [
+                  {
+                    "name": "REDIS_PASSWORD",
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "${DATABASE_SERVICE_NAME}",
+                        "key" : "database-password"
+                      }
+                    }
+                  },
+                  {
+                    "name": "POD_IP",
+                    "valueFrom": {
+                      "fieldRef" : {
+                        "apiVersion" : "v1",
+                        "fieldPath" : "status.podIP"
+                      }
+                    }
+                  }
+                ],
+                "resources": {
+                  "limits": {
+                    "memory": "${MEMORY_LIMIT}"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "${DATABASE_SERVICE_NAME}-data",
+                    "mountPath": "/var/lib/redis/data"
+                  },
+                  {
+                    "name": "post-init",
+                    "mountPath": "/usr/share/container-scripts/redis/post-init.sh",
+                    "subPath": "post-init.sh"
+                  }
+                ],
+                "terminationMessagePath": "/dev/termination-log",
+                "terminationMessagePolicy": "File",
+                "terminationGracePeriodSeconds": 30,
+                "imagePullPolicy": "IfNotPresent",
+                "capabilities": {},
+                "securityContext": {
+                  "capabilities": {},
+                  "privileged": false
+                }
+              }
+            ],
+            "volumes": [
+              {
+                "name": "${DATABASE_SERVICE_NAME}-data",
+                "persistentVolumeClaim": {
+                  "claimName": "${DATABASE_SERVICE_NAME}"
+                }
+              },
+              {
+                "configMap": {
+                  "name": "${DATABASE_SERVICE_NAME}",
+                  "defaultMode": 493
+                },
+                "name": "post-init"
+              }
+            ],
+            "restartPolicy": "Always",
+            "dnsPolicy": "ClusterFirst"
+          }
+        },
+        "updateStrategy": {
+          "rollingUpdate": {
+            "partition": 0
+          },
+          "type": "RollingUpdate"
+        },
+        "volumeClaimTemplates": [
+          {
+            "metadata": {
+              "name": "${DATABASE_SERVICE_NAME}-data"
+            },
+            "spec":{
+              "accessModes":[
+                "ReadWriteOnce"
+              ],
+              "resources": {
+                "requests": {
+                  "storage": "${VOLUME_CAPACITY}"
+                }
+              }
+            },
+            "status": {
+              "phase": "Pending"
+            }
+          }
+        ]
+      },
+      "status": {}
+    }
+  ],
+  "parameters": [
+    {
+      "name": "MEMORY_LIMIT",
+      "displayName": "Memory Limit",
+      "description": "Maximum amount of memory the container can use.",
+      "value": "512Mi",
+      "required": true
+    },
+    {
+      "name": "DATABASE_SERVICE_NAME",
+      "displayName": "Database Service Name",
+      "description": "The name of the OpenShift Service exposed for the database.",
+      "value": "redis",
+      "required": true
+    },
+    {
+      "name": "REDIS_PASSWORD",
+      "displayName": "Redis Connection Password",
+      "description": "Password for the Redis connection user.",
+      "generate": "expression",
+      "from": "[a-zA-Z0-9]{16}",
+      "required": true
+    },
+    {
+      "name": "VOLUME_CAPACITY",
+      "displayName": "Volume Capacity",
+      "description": "Volume space available for data, e.g. 512Mi, 2Gi.",
+      "value": "1Gi",
+      "required": true
+    }
+  ]
+}

@@ -5,6 +5,10 @@
 # You may also start redis server locally to load some data for example,
 # but do not forget to stop it after it, so it can be restarted after it.
 
+if [[ -v REDIS_PASSWORD ]]; then
+  echo masterauth $REDIS_PASSWORD >> /etc/redis.conf
+fi
+
 cat << EOF >> /etc/redis.conf
 cluster-enabled yes
 cluster-require-full-coverage no
